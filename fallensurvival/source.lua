@@ -7,17 +7,16 @@
 local Players           = game:GetService('Players');
 local RunService        = game:GetService('RunService');
 local UserInputService  = game:GetService('UserInputService');
+local HttpService       = game:GetService('HttpService');
 local Lighting          = game:GetService('Lighting');
 local LocalPlayer       = Players.LocalPlayer;
 local Camera            = workspace.CurrentCamera;
-local Mouse             = LocalPlayer:GetMouse();
 
--- Libraries
+-- Remote loading
 local GITHUB_REPO = 'https://raw.githubusercontent.com/mainstreamed/amongus-hook/refs/heads/main/';
 
 local function fetch(path)
-	local response = request({Url = GITHUB_REPO .. path; Method = 'GET'});
-	return response.Body;
+	return request({Url = GITHUB_REPO .. path; Method = 'GET'}).Body;
 end;
 
 loadstring(fetch('assets/drawingSetup.lua'))();
@@ -31,27 +30,26 @@ local npcESP    = espLib.npcESP;
 -- Constants
 local STAFF_GROUP_ID = 1154360;
 local STAFF_MIN_RANK = 15;
-
-local CONFIG_FOLDER = 'amghook\\fallen';
+local CONFIG_FOLDER  = 'amghook/fallen';
 
 -- State
 local state = {
 	silent          = {};
 	mousePos        = Vector2.new(0, 0);
-	toolInfo        = nil;
-	scanOrigin      = nil;
 	fireRemote      = nil;
 	connection      = nil;
 	staffList       = {};
+	flyActive       = false;
 };
 
--- Drawings for aimbot
+-- Aimbot drawings
 local aimDrawings = {
 	fov = Drawing.new('Circle');
 	snapline = Drawing.new('Line');
 	hitscanIndicator = Drawing.new('Circle');
 	manipulationIndicator = Drawing.new('Circle');
 };
+
 aimDrawings.fov.Thickness = 1;
 aimDrawings.fov.Filled = false;
 aimDrawings.fov.Color = Color3.new(1, 1, 1);
@@ -78,17 +76,18 @@ aimDrawings.manipulationIndicator.Visible = false;
 -- ============================================
 -- UI SETUP
 -- ============================================
+
 local window, flags = uiLib.windowClass.new({
 	title = 'amongus.hook - Fallen Survival';
 });
 
 -- Tabs
-local combatTab   = window:addTab('Combat');
-local visualsTab  = window:addTab('Visuals');
-local playerTab   = window:addTab('Player');
-local miscTab     = window:addTab('Misc');
+local combatTab  = window:addTab('Combat');
+local visualsTab = window:addTab('Visuals');
+local playerTab  = window:addTab('Player');
+local miscTab    = window:addTab('Misc');
 
--- Combat Tab (Left)
+-- Combat > Left
 local silentAimToggle = combatTab:addToggle({text = 'Silent Aim'; flag = 'silentAim_toggle'}, 1);
 silentAimToggle:addKeypicker({flag = 'silentAim_keybind'; default = 'None'});
 
@@ -101,7 +100,7 @@ combatTab:addToggle({text = 'Auto Shoot'; flag = 'silentAim_autoShoot'}, 1);
 combatTab:addToggle({text = 'Snapline'; flag = 'silentAim_snapline'}, 1);
 combatTab:addToggle({text = 'Target NPCs'; flag = 'silentAim_targetNPCs'}, 1);
 
--- Combat Tab (Right)
+-- Combat > Right
 combatTab:addToggle({text = 'Hitscan'; flag = 'silentAim_hitscan'}, 2);
 combatTab:addToggle({text = 'Hitscan Indicator'; flag = 'silentAim_hitscanIndicator'}, 2);
 combatTab:addToggle({text = 'Instant Hit'; flag = 'silentAim_instantHit'}, 2);
@@ -112,7 +111,7 @@ combatTab:addSlider({text = 'Recoil %'; min = 0; max = 100; default = 100; flag 
 combatTab:addToggle({text = 'Always Shoot'; flag = 'alwaysShoot_toggle'; risky = true}, 2);
 combatTab:addToggle({text = 'Combat Mode'; flag = 'combatMode_toggle'}, 2);
 
--- Visuals Tab (Left) - Player ESP
+-- Visuals > Left (Player ESP)
 local espToggle = visualsTab:addToggle({text = 'Player ESP'; flag = 'playerESP_toggle'; default = true}, 1);
 espToggle:addColourpicker({flag = 'playerESP_box_colour'; default = Color3.new(1, 1, 1)});
 visualsTab:addToggle({text = 'ESP Names'; flag = 'playerESP_name'; default = true}, 1);
@@ -125,7 +124,7 @@ chamsToggle:addColourpicker({flag = 'localChams_colour'; default = Color3.new(1,
 visualsTab:addDropdown({text = 'Chams Material'; options = {'Neon', 'ForceField', 'Glass', 'SmoothPlastic'}; default = 'Neon'; flag = 'localChams_material'}, 1);
 visualsTab:addSlider({text = 'Chams Transparency'; min = 0; max = 100; default = 50; flag = 'localChams_transparency'}, 1);
 
--- Visuals Tab (Right) - World ESP
+-- Visuals > Right (World ESP)
 visualsTab:addToggle({text = 'NPC ESP'; flag = 'npcESP_toggle'}, 2);
 visualsTab:addToggle({text = 'Resource ESP'; flag = 'entityESP_toggle'}, 2);
 visualsTab:addToggle({text = 'Airdrop ESP'; flag = 'airdropESP_toggle'}, 2);
@@ -135,7 +134,7 @@ visualsTab:addToggle({text = 'Fullbright'; flag = 'fullbrightToggle'}, 2);
 visualsTab:addToggle({text = 'FOV Changer'; flag = 'fovChanger_toggle'}, 2);
 visualsTab:addSlider({text = 'FOV Amount'; min = 30; max = 120; default = 70; flag = 'fovChanger_amount'}, 2);
 
--- Player Tab (Left)
+-- Player > Left
 playerTab:addToggle({text = 'Speed Hack'; flag = 'speedHack_toggle'; risky = true}, 1);
 playerTab:addSlider({text = 'Speed Amount'; min = 16; max = 100; default = 24; flag = 'speedHack_amount'}, 1);
 playerTab:addToggle({text = 'Fly'; flag = 'fly_toggle'; risky = true}, 1);
@@ -143,7 +142,7 @@ playerTab:addSlider({text = 'Fly Speed'; min = 10; max = 200; default = 50; flag
 playerTab:addToggle({text = 'No Fall Damage'; flag = 'noFallDamage_toggle'}, 1);
 playerTab:addToggle({text = 'Silent Walk'; flag = 'silentWalk_toggle'}, 1);
 
--- Player Tab (Right)
+-- Player > Right
 local zoomToggle = playerTab:addToggle({text = 'Zoom'; flag = 'zoom_toggle'}, 2);
 zoomToggle:addKeypicker({flag = 'zoom_keybind'; default = 'None'; mode = 'hold'});
 playerTab:addSlider({text = 'Zoom Amount'; min = 5; max = 70; default = 20; flag = 'zoom_amount'}, 2);
@@ -154,26 +153,21 @@ playerTab:addSlider({text = 'Melee Range'; min = 1; max = 20; default = 5; flag 
 playerTab:addToggle({text = 'Increase Melee Speed'; flag = 'increaseMeleeSpeed_toggle'}, 2);
 playerTab:addSlider({text = 'Melee Speed'; min = 1; max = 10; default = 2; flag = 'increaseMeleeSpeed_amount'}, 2);
 
--- Misc Tab (Left)
+-- Misc > Left
 miscTab:addToggle({text = 'Staff Detector'; flag = 'staffDetectorToggle'; default = true}, 1);
 miscTab:addToggle({text = 'Disable Traps'; flag = 'disableTraps_toggle'}, 1);
 miscTab:addToggle({text = 'Disable Spikes'; flag = 'disableSpikes_toggle'}, 1);
 
--- Misc Tab (Right) - Config
+-- Misc > Right (Config)
 miscTab:addDropdown({text = 'Config'; options = {'config1', 'config2', 'config3'}; default = 'config1'; flag = 'configName'}, 2);
-miscTab:addButton('Save Config', function()
-	saveConfig();
-end, 2);
-miscTab:addButton('Load Config', function()
-	loadConfig();
-end, 2);
+miscTab:addButton('Save Config', function() saveConfig(); end, 2);
+miscTab:addButton('Load Config', function() loadConfig(); end, 2);
 
 
 -- ============================================
 -- GAME HOOKS
 -- ============================================
 
--- Find fireRemote and weapon functions via getgc
 local function setupGameHooks()
 	if (not getgc) then return; end;
 
@@ -188,7 +182,7 @@ local function setupGameHooks()
 			local upvalues = debug.getupvalues(obj);
 			local constants = debug.getconstants(obj);
 
-			-- Find fireRemote from AssetContainer functions
+			-- Find fireRemote from AssetContainer
 			if (not state.fireRemote) then
 				for _, uv in upvalues do
 					if (type(uv) == 'function') then
@@ -230,7 +224,7 @@ local function checkStaff(player)
 	if (success and rank >= STAFF_MIN_RANK) then
 		if (not table.find(state.staffList, player)) then
 			table.insert(state.staffList, player);
-			window:notify(string.format('Staff Detector: %s has joined your game!', player.DisplayName), 5);
+			window:notify(string.format('Staff Detector: %s joined!', player.DisplayName), 5);
 		end;
 	end;
 end;
@@ -239,7 +233,7 @@ local function onStaffLeft(player)
 	local idx = table.find(state.staffList, player);
 	if (idx) then
 		table.remove(state.staffList, idx);
-		window:notify(string.format('Staff Detector: %s has left your game!', player.DisplayName), 5);
+		window:notify(string.format('Staff Detector: %s left!', player.DisplayName), 5);
 	end;
 end;
 
@@ -248,7 +242,6 @@ end;
 -- ESP SETUP
 -- ============================================
 
--- Player ESP
 local function setupPlayerESP()
 	for _, player in Players:GetPlayers() do
 		if (player ~= LocalPlayer) then
@@ -268,58 +261,83 @@ local function setupPlayerESP()
 	end);
 end;
 
--- Entity/NPC ESP (scan workspace folders)
+-- Classify workspace models into ESP categories
+local NPC_NAMES = {Soldier = true; Bruno = true; Boris = true; Brutus = true; bradley = true; scav = true};
+
+local ANIMAL_PATTERNS = {
+	{pattern = 'PREFAB_ANIMAL_DEER';     name = 'deer'};
+	{pattern = 'PREFAB_ANIMAL_WOLF';     name = 'wolf'};
+	{pattern = 'PREFAB_ANIMAL_WILDBOAR'; name = 'boar'};
+};
+
+local RESOURCE_PATTERNS = {
+	{pattern = 'Phosphate_Node'; name = 'phosphate'};
+	{pattern = 'Metal_Node';     name = 'metal'};
+	{pattern = 'Stone_Node';     name = 'stone'};
+	{pattern = 'Hemp';           name = 'hemp'};
+};
+
 local function classifyModel(model)
 	if (model.ClassName ~= 'Model') then return nil; end;
 	local name = model.Name;
 
 	-- NPCs
-	if (name == 'Soldier' or name == 'Bruno' or name == 'Boris' or name == 'Brutus') then
+	if (NPC_NAMES[name]) then
 		return 'npc', name;
 	end;
 
 	-- Animals
-	if (string.find(name, 'PREFAB_ANIMAL_DEER')) then return 'animal', 'deer'; end;
-	if (string.find(name, 'PREFAB_ANIMAL_WOLF')) then return 'animal', 'wolf'; end;
-	if (string.find(name, 'PREFAB_ANIMAL_WILDBOAR')) then return 'animal', 'boar'; end;
-	if (name == 'bradley' or name == 'scav') then return 'npc', name; end;
+	for _, entry in ANIMAL_PATTERNS do
+		if (string.find(name, entry.pattern)) then
+			return 'animal', entry.name;
+		end;
+	end;
 
 	-- Resources
-	if (string.find(name, 'Phosphate_Node')) then return 'resource', 'phosphate'; end;
-	if (string.find(name, 'Metal_Node')) then return 'resource', 'metal'; end;
-	if (string.find(name, 'Stone_Node')) then return 'resource', 'stone'; end;
-	if (string.find(name, 'Hemp')) then return 'resource', 'hemp'; end;
+	for _, entry in RESOURCE_PATTERNS do
+		if (string.find(name, entry.pattern)) then
+			return 'resource', entry.name;
+		end;
+	end;
 
-	-- Containers
-	if (string.find(name, 'airdrop') or string.find(name, 'Care Package')) then return 'airdrop', 'airdrop'; end;
+	-- Airdrops
+	if (string.find(name, 'airdrop') or string.find(name, 'Care Package')) then
+		return 'airdrop', 'airdrop';
+	end;
 
 	return nil;
+end;
+
+local ESP_COLORS = {
+	npc      = Color3.new(1, 0.3, 0.3);
+	animal   = Color3.new(0.8, 0.5, 0.2);
+	resource = Color3.new(0.5, 1, 0.5);
+	airdrop  = Color3.new(1, 1, 0);
+};
+
+local function addESPForModel(child)
+	local category, displayName = classifyModel(child);
+	if (not category) then return; end;
+
+	local color = ESP_COLORS[category];
+
+	-- NPCs and animals have humanoids -> use npcESP
+	if (category == 'npc' or category == 'animal') then
+		npcESP.new(child, displayName, displayName, color);
+	else
+		entityESP.new(child, displayName, displayName, color);
+	end;
 end;
 
 local function scanWorkspace()
 	for _, folder in workspace:GetChildren() do
 		if (folder.ClassName ~= 'Folder') then continue; end;
 
-		local function processChild(child)
-			local category, name = classifyModel(child);
-			if (not category) then return; end;
-
-			if (category == 'npc') then
-				npcESP.new(child, name, name, Color3.new(1, 0.3, 0.3));
-			elseif (category == 'animal') then
-				npcESP.new(child, name, name, Color3.new(0.8, 0.5, 0.2));
-			elseif (category == 'resource') then
-				entityESP.new(child, name, name, Color3.new(0.5, 1, 0.5));
-			elseif (category == 'airdrop') then
-				entityESP.new(child, name, 'airdrop', Color3.new(1, 1, 0));
-			end;
-		end;
-
 		for _, descendant in folder:GetDescendants() do
-			processChild(descendant);
+			addESPForModel(descendant);
 		end;
 
-		folder.DescendantAdded:Connect(processChild);
+		folder.DescendantAdded:Connect(addESPForModel);
 	end;
 end;
 
@@ -340,29 +358,27 @@ local function getClosestTarget()
 	local best = {distance = flags.silentAim_FOVSize.value};
 	local hitpart = flags.silentAim_hitpart.value;
 	local visCheck = flags.silentAim_visibleCheck.value;
-	local teamCheck = flags.silentAim_teamCheck.value;
 
-	-- Players
+	-- Scan players
 	for player, espData in playerESP.playerCache do
 		if (not player.Parent) then continue; end;
 		if (not espData.current or not espData.current.active) then continue; end;
 
-		local rootPart = espData.current.rootPart;
-		local humanoid = espData.current.humanoid;
+		local rootPart  = espData.current.rootPart;
+		local humanoid  = espData.current.humanoid;
 		local character = espData.current.character;
 		if (not rootPart or not humanoid or humanoid.Health <= 0) then continue; end;
 
+		-- Determine target position based on selected hit part
 		local targetPos;
 		if (hitpart == 'Head') then
 			local head = character:FindFirstChild('Head');
 			targetPos = head and head.Position or rootPart.Position;
-		elseif (hitpart == 'Torso') then
-			targetPos = rootPart.Position;
-		else -- closest
+		else
 			targetPos = rootPart.Position;
 		end;
 
-		-- Use rebuilt position if available (desync resolution)
+		-- Use rebuilt position if available (desync correction)
 		if (espData.current.rebuiltPos) then
 			targetPos = espData.current.rebuiltPos;
 		end;
@@ -372,33 +388,31 @@ local function getClosestTarget()
 
 		local screenVec = Vector2.new(screenPos.X, screenPos.Y);
 		local dist = (screenVec - state.mousePos).Magnitude;
-
 		if (dist > best.distance) then continue; end;
 
-		-- Visible check
+		-- Visibility raycast
 		if (visCheck) then
 			local origin = Camera.CFrame.Position;
 			local params = RaycastParams.new();
 			params.FilterType = Enum.RaycastFilterType.Exclude;
 			params.FilterDescendantsInstances = {LocalPlayer.Character, character};
-			local result = workspace:Raycast(origin, targetPos - origin, params);
-			if (result) then continue; end;
+			if (workspace:Raycast(origin, targetPos - origin, params)) then continue; end;
 		end;
 
 		best = {
-			distance = dist;
-			player = player;
+			distance  = dist;
+			player    = player;
 			character = character;
-			vector3 = targetPos;
-			vector2 = screenVec;
-			humanoid = humanoid;
-			rootPart = rootPart;
+			vector3   = targetPos;
+			vector2   = screenVec;
+			humanoid  = humanoid;
+			rootPart  = rootPart;
 		};
 	end;
 
-	-- NPCs
+	-- Scan NPCs
 	if (flags.silentAim_targetNPCs.value) then
-		for entity, espData in npcESP.npcCache do
+		for entity, _ in npcESP.npcCache do
 			if (not entity.Parent) then continue; end;
 			local rootPart = entity:FindFirstChild('HumanoidRootPart');
 			local humanoid = entity:FindFirstChild('Humanoid');
@@ -412,12 +426,12 @@ local function getClosestTarget()
 
 			if (dist < best.distance) then
 				best = {
-					distance = dist;
+					distance  = dist;
 					character = entity;
-					vector3 = rootPart.Position;
-					vector2 = screenVec;
-					humanoid = humanoid;
-					rootPart = rootPart;
+					vector3   = rootPart.Position;
+					vector2   = screenVec;
+					humanoid  = humanoid;
+					rootPart  = rootPart;
 				};
 			end;
 		end;
@@ -459,7 +473,7 @@ end;
 
 local originalTransparencies = {};
 
-local function toggleXray(enabled)
+local function setXray(enabled)
 	if (enabled) then
 		for _, obj in workspace:GetDescendants() do
 			if (obj:IsA('BasePart') and not obj:IsDescendantOf(LocalPlayer.Character or game)) then
@@ -470,9 +484,9 @@ local function toggleXray(enabled)
 			end;
 		end;
 	else
-		for obj, transparency in originalTransparencies do
+		for obj, original in originalTransparencies do
 			if (obj.Parent) then
-				obj.Transparency = transparency;
+				obj.Transparency = original;
 			end;
 		end;
 		originalTransparencies = {};
@@ -480,7 +494,7 @@ local function toggleXray(enabled)
 end;
 
 flags.xray_toggle:OnChanged(function(value)
-	toggleXray(value);
+	setXray(value);
 end);
 
 
@@ -488,24 +502,35 @@ end);
 -- FULLBRIGHT
 -- ============================================
 
-local originalLighting = {};
+local savedLighting = {};
 
-local function toggleFullbright(enabled)
+local function setFullbright(enabled)
 	if (enabled) then
-		originalLighting.Ambient = Lighting.Ambient;
-		originalLighting.FogEnd = Lighting.FogEnd;
+		savedLighting.Ambient = Lighting.Ambient;
+		savedLighting.FogEnd  = Lighting.FogEnd;
 		Lighting.Ambient = Color3.new(1, 1, 1);
-		Lighting.FogEnd = 100000;
-	else
-		if (originalLighting.Ambient) then
-			Lighting.Ambient = originalLighting.Ambient;
-			Lighting.FogEnd = originalLighting.FogEnd;
-		end;
+		Lighting.FogEnd  = 100000;
+	elseif (savedLighting.Ambient) then
+		Lighting.Ambient = savedLighting.Ambient;
+		Lighting.FogEnd  = savedLighting.FogEnd;
 	end;
 end;
 
 flags.fullbrightToggle:OnChanged(function(value)
-	toggleFullbright(value);
+	setFullbright(value);
+end);
+
+
+-- ============================================
+-- FOV CHANGER
+-- ============================================
+
+local savedFOV = Camera.FieldOfView;
+
+flags.fovChanger_toggle:OnChanged(function(value)
+	if (not value) then
+		Camera.FieldOfView = savedFOV;
+	end;
 end);
 
 
@@ -513,15 +538,19 @@ end);
 -- SPEED HACK
 -- ============================================
 
-local function applySpeedHack()
+local function applySpeedHack(dt)
 	if (not flags.speedHack_toggle.value) then return; end;
+
 	local character = LocalPlayer.Character;
 	if (not character) then return; end;
+
 	local rootPart = character:FindFirstChild('HumanoidRootPart');
 	local humanoid = character:FindFirstChild('Humanoid');
 	if (not rootPart or not humanoid) then return; end;
 
 	local moveDir = humanoid.MoveDirection;
+	if (moveDir.Magnitude == 0) then return; end;
+
 	local speed = flags.speedHack_amount.value;
 	rootPart.Velocity = Vector3.new(moveDir.X * speed, rootPart.Velocity.Y, moveDir.Z * speed);
 end;
@@ -531,47 +560,99 @@ end;
 -- FLY
 -- ============================================
 
-local function applyFly()
-	if (not flags.fly_toggle.value) then return; end;
+local function applyFly(dt)
 	local character = LocalPlayer.Character;
 	if (not character) then return; end;
 	local rootPart = character:FindFirstChild('HumanoidRootPart');
 	if (not rootPart) then return; end;
 
+	if (not flags.fly_toggle.value) then
+		-- Cleanup: unanchor when fly is turned off
+		if (state.flyActive) then
+			rootPart.Anchored = false;
+			state.flyActive = false;
+		end;
+		return;
+	end;
+
+	state.flyActive = true;
 	local speed = flags.fly_speed.value;
 	local camCF = Camera.CFrame;
-	local moveDir = Vector3.new(0, 0, 0);
+	local moveDir = Vector3.zero;
 
-	if (UserInputService:IsKeyDown(Enum.KeyCode.W)) then moveDir += camCF.LookVector; end;
-	if (UserInputService:IsKeyDown(Enum.KeyCode.S)) then moveDir -= camCF.LookVector; end;
-	if (UserInputService:IsKeyDown(Enum.KeyCode.D)) then moveDir += camCF.RightVector; end;
-	if (UserInputService:IsKeyDown(Enum.KeyCode.A)) then moveDir -= camCF.RightVector; end;
-	if (UserInputService:IsKeyDown(Enum.KeyCode.Space)) then moveDir += Vector3.new(0, 1, 0); end;
-	if (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)) then moveDir -= Vector3.new(0, 1, 0); end;
+	if (UserInputService:IsKeyDown(Enum.KeyCode.W))           then moveDir += camCF.LookVector;        end;
+	if (UserInputService:IsKeyDown(Enum.KeyCode.S))           then moveDir -= camCF.LookVector;        end;
+	if (UserInputService:IsKeyDown(Enum.KeyCode.D))           then moveDir += camCF.RightVector;       end;
+	if (UserInputService:IsKeyDown(Enum.KeyCode.A))           then moveDir -= camCF.RightVector;       end;
+	if (UserInputService:IsKeyDown(Enum.KeyCode.Space))       then moveDir += Vector3.new(0, 1, 0);    end;
+	if (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)) then moveDir -= Vector3.new(0, 1, 0);    end;
 
 	if (moveDir.Magnitude > 0) then
 		moveDir = moveDir.Unit;
 	end;
 
 	rootPart.Anchored = true;
-	rootPart.CFrame = rootPart.CFrame + (moveDir * speed * 0.016);
+	rootPart.CFrame = rootPart.CFrame + (moveDir * speed * dt);
 end;
+
+
+-- ============================================
+-- TRAPS & SPIKES
+-- ============================================
+
+local trapNames  = {TouchCollision = true; CactusPart = true};
+local spikeNames = {SpikeTrap = true; Spikes = true};
+
+local function updateTrapsAndSpikes(obj)
+	if (trapNames[obj.Name] and flags.disableTraps_toggle.value) then
+		obj.CanTouch = false;
+	end;
+	if (spikeNames[obj.Name] and flags.disableSpikes_toggle.value) then
+		obj.CanTouch = false;
+	end;
+end;
+
+flags.disableTraps_toggle:OnChanged(function(value)
+	for _, obj in workspace:GetDescendants() do
+		if (trapNames[obj.Name]) then
+			obj.CanTouch = not value;
+		end;
+	end;
+end);
+
+flags.disableSpikes_toggle:OnChanged(function(value)
+	for _, obj in workspace:GetDescendants() do
+		if (spikeNames[obj.Name]) then
+			obj.CanTouch = not value;
+		end;
+	end;
+end);
+
+workspace.DescendantAdded:Connect(function(obj)
+	task.defer(updateTrapsAndSpikes, obj);
+end);
 
 
 -- ============================================
 -- CONFIG SAVE / LOAD
 -- ============================================
 
-function saveConfig()
-	local configName = flags.configName.value;
-	local path = CONFIG_FOLDER .. '\\configs\\' .. configName;
+local function ensureFolder(path)
+	if (not isfolder(path)) then makefolder(path); end;
+end;
 
-	if (not isfolder(CONFIG_FOLDER)) then makefolder(CONFIG_FOLDER); end;
-	if (not isfolder(CONFIG_FOLDER .. '\\configs')) then makefolder(CONFIG_FOLDER .. '\\configs'); end;
+local function saveConfig()
+	local configName = flags.configName.value;
+	local configDir  = CONFIG_FOLDER .. '/configs';
+	local path       = configDir .. '/' .. configName;
+
+	ensureFolder(CONFIG_FOLDER);
+	ensureFolder(configDir);
 
 	local data = {};
 	for name, flag in window.flags do
 		if (name == 'configName') then continue; end;
+
 		local entry = {type = flag.type; value = flag.value};
 		if (flag.type == 'keypicker') then
 			entry.key = flag.key;
@@ -582,28 +663,22 @@ function saveConfig()
 		data[name] = entry;
 	end;
 
-	local success, json = pcall(game.GetService, game, 'HttpService');
-	if (success) then
-		writefile(path, json:JSONEncode(data));
-		window:notify('Config saved!', 3);
-	end;
+	writefile(path, HttpService:JSONEncode(data));
+	window:notify('Config saved!', 3);
 end;
 
-function loadConfig()
+local function loadConfig()
 	local configName = flags.configName.value;
-	local path = CONFIG_FOLDER .. '\\configs\\' .. configName;
+	local path       = CONFIG_FOLDER .. '/configs/' .. configName;
 
 	if (not isfile(path)) then
-		window:notify('Config not found!', 3);
+		window:notify('Config not found.', 3);
 		return;
 	end;
 
-	local success, json = pcall(game.GetService, game, 'HttpService');
-	if (not success) then return; end;
-
-	local ok, data = pcall(json.JSONDecode, json, readfile(path));
+	local ok, data = pcall(HttpService.JSONDecode, HttpService, readfile(path));
 	if (not ok or type(data) ~= 'table') then
-		window:notify('Config corrupted!', 3);
+		window:notify('Config corrupted.', 3);
 		return;
 	end;
 
@@ -624,22 +699,21 @@ end;
 
 
 -- ============================================
--- MAIN RENDER LOOP
+-- RENDER LOOP
 -- ============================================
 
-RunService.Heartbeat:Connect(function()
+RunService.Heartbeat:Connect(function(dt)
 	local character = LocalPlayer.Character;
-	local rootPart = character and character:FindFirstChild('HumanoidRootPart');
-	local humanoid = character and character:FindFirstChild('Humanoid');
+	local rootPart  = character and character:FindFirstChild('HumanoidRootPart');
 
-	-- Update mouse position
+	-- Mouse position (used by aimbot)
 	state.mousePos = UserInputService:GetMouseLocation();
 
-	-- FOV Circle
+	-- FOV circle
 	if (flags.silentAim_toggle.value) then
-		aimDrawings.fov.Visible = true;
+		aimDrawings.fov.Visible  = true;
 		aimDrawings.fov.Position = state.mousePos;
-		aimDrawings.fov.Radius = flags.silentAim_FOVSize.value;
+		aimDrawings.fov.Radius   = flags.silentAim_FOVSize.value;
 	else
 		aimDrawings.fov.Visible = false;
 	end;
@@ -647,11 +721,11 @@ RunService.Heartbeat:Connect(function()
 	-- Silent aim targeting
 	getClosestTarget();
 
-	-- Snapline
+	-- Snapline to target
 	if (flags.silentAim_snapline.value and state.silent.vector2) then
 		aimDrawings.snapline.Visible = true;
-		aimDrawings.snapline.From = state.mousePos;
-		aimDrawings.snapline.To = state.silent.vector2;
+		aimDrawings.snapline.From    = state.mousePos;
+		aimDrawings.snapline.To      = state.silent.vector2;
 	else
 		aimDrawings.snapline.Visible = false;
 	end;
@@ -659,13 +733,13 @@ RunService.Heartbeat:Connect(function()
 	-- Hitscan indicator
 	if (flags.silentAim_hitscanIndicator.value and state.silent.hitscanPosition) then
 		local pos, onScreen = Camera:WorldToViewportPoint(state.silent.hitscanPosition);
-		aimDrawings.hitscanIndicator.Visible = onScreen;
+		aimDrawings.hitscanIndicator.Visible  = onScreen;
 		aimDrawings.hitscanIndicator.Position = Vector2.new(pos.X, pos.Y);
 	else
 		aimDrawings.hitscanIndicator.Visible = false;
 	end;
 
-	-- Player ESP rendering
+	-- Player ESP
 	if (flags.playerESP_toggle.value and rootPart) then
 		local espSettings = {
 			box       = true;
@@ -674,7 +748,7 @@ RunService.Heartbeat:Connect(function()
 			healthbar = flags.playerESP_healthbar.value;
 			weapon    = flags.playerESP_weapon.value;
 		};
-		for player, espData in playerESP.playerCache do
+		for _, espData in playerESP.playerCache do
 			if (espData.current and espData.current.active) then
 				local dist = (espData.current.rootPart.Position - rootPart.Position).Magnitude;
 				espData:loop(espSettings, dist);
@@ -688,28 +762,40 @@ RunService.Heartbeat:Connect(function()
 		end;
 	end;
 
-	-- NPC ESP rendering
-	if (flags.npcESP_toggle.value and rootPart) then
+	-- NPC & Animal ESP
+	local showNPCs    = flags.npcESP_toggle.value;
+	local showAnimals = flags.animalESP_toggle.value;
+
+	if ((showNPCs or showAnimals) and rootPart) then
 		local npcSettings = {box = true; name = true; distance = true; healthbar = true};
 		for entity, espData in npcESP.npcCache do
-			if (entity.Parent) then
+			if (not entity.Parent) then
+				espData:hideDrawings();
+				npcESP.npcCache[entity] = nil;
+				continue;
+			end;
+
+			-- Filter by category: npcs vs animals
+			local sn = espData.settingName;
+			local isAnimal = (sn == 'deer' or sn == 'wolf' or sn == 'boar');
+			local visible  = (isAnimal and showAnimals) or (not isAnimal and showNPCs);
+
+			if (visible) then
 				local entryRoot = entity:FindFirstChild('HumanoidRootPart');
 				local dist = entryRoot and (entryRoot.Position - rootPart.Position).Magnitude or 9999;
 				espData:loop(npcSettings, dist);
 			else
 				espData:hideDrawings();
-				npcESP.npcCache[entity] = nil;
 			end;
 		end;
 	else
 		for _, espData in npcESP.npcCache do espData:hideDrawings(); end;
 	end;
 
-	-- Entity ESP rendering
+	-- Entity ESP (resources, airdrops)
 	if (rootPart) then
 		local showResources = flags.entityESP_toggle.value;
-		local showAirdrops = flags.airdropESP_toggle.value;
-		local showAnimals = flags.animalESP_toggle.value;
+		local showAirdrops  = flags.airdropESP_toggle.value;
 		local entitySettings = {box = true; name = true; distance = true};
 
 		for entity, espData in entityESP.entityCache do
@@ -719,12 +805,8 @@ RunService.Heartbeat:Connect(function()
 				continue;
 			end;
 
-			local show = false;
-			local sn = espData.settingName;
-			if (sn == 'airdrop' and showAirdrops) then show = true;
-			elseif ((sn == 'phosphate' or sn == 'metal' or sn == 'stone' or sn == 'hemp') and showResources) then show = true;
-			elseif ((sn == 'deer' or sn == 'wolf' or sn == 'boar') and showAnimals) then show = true;
-			end;
+			local sn   = espData.settingName;
+			local show = (sn == 'airdrop' and showAirdrops) or (showResources);
 
 			if (show) then
 				local entryRoot = entity:FindFirstChild('HumanoidRootPart') or entity.PrimaryPart;
@@ -741,37 +823,17 @@ RunService.Heartbeat:Connect(function()
 		Camera.FieldOfView = flags.fovChanger_amount.value;
 	end;
 
-	-- Zoom
+	-- Zoom (overrides FOV changer while held)
 	if (flags.zoom_toggle.value and flags.zoom_keybind.value) then
 		Camera.FieldOfView = flags.zoom_amount.value;
 	end;
 
-	-- Speed Hack
-	applySpeedHack();
+	-- Movement hacks
+	applySpeedHack(dt);
+	applyFly(dt);
 
-	-- Fly
-	applyFly();
-
-	-- Local Chams
+	-- Local chams
 	updateChams();
 end);
-
--- Disable traps
-if (flags.disableTraps_toggle) then
-	flags.disableTraps_toggle:OnChanged(function(value)
-		for _, obj in workspace:GetDescendants() do
-			if (obj.Name == 'TouchCollision' or obj.Name == 'CactusPart') then
-				obj.CanTouch = not value;
-			end;
-		end;
-	end);
-end;
-
--- Staff check existing players on load
-for _, player in Players:GetPlayers() do
-	if (player ~= LocalPlayer) then
-		task.spawn(checkStaff, player);
-	end;
-end;
 
 window:notify('amongus.hook loaded!', 5);
